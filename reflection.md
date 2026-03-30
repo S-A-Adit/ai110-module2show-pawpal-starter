@@ -50,8 +50,13 @@ The scheduler evaluates tasks in priority order and permanently skips any task t
 
 **b. Tradeoffs**
 
-- Describe one tradeoff your scheduler makes.
-- Why is that tradeoff reasonable for this scenario?
+**Tradeoff: conflict detection is advisory, not enforced — the schedule can include tasks that overlap.**
+
+`conflict_warnings()` and `generate_plan()` are completely independent. When you call `generate_plan()`, it picks tasks greedily by time and priority; it never consults `conflict_warnings()` and never removes or reschedules a task because it overlaps with another. The result is that a generated schedule can contain two tasks at the same time slot while also printing a warning that they conflict. The owner sees both the conflict notice and a schedule that still includes both tasks, and must resolve the clash manually.
+
+The alternative — having `generate_plan()` automatically drop one of the conflicting tasks — would require the scheduler to make a value judgment it isn't equipped to make: which task to sacrifice, whether to shift start times, or whether to ask the user. Embedding that decision silently inside the algorithm would hide the conflict from the owner rather than informing them. Keeping the two concerns separate (detect vs. schedule) is a deliberate choice: the scheduler's job is to fit tasks into a time budget, and the conflict detector's job is to surface information. Mixing them would make both harder to reason about and test.
+
+This tradeoff is reasonable for an MVP where the owner is expected to look at the output and make final decisions. It would become unreasonable in a fully automated system where the schedule is executed without human review — at that point, enforcing conflict resolution inside `generate_plan()` would be necessary.
 
 ---
 
