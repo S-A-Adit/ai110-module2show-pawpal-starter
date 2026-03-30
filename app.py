@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd
 from pawpal_system import Owner, Pet, Task, Scheduler
 
 st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
@@ -117,26 +118,33 @@ else:
                 st.error(str(e))
 
     # --- Task list with complete / reset / remove controls ---
-    if pet.tasks:
-        st.write(f"**{pet.name}'s tasks:**")
-        for i, task in enumerate(pet.tasks):
+    # Use Scheduler.tasks_by_priority() filtered to this pet so the list always
+    # shows high → medium → low, with timed tasks first within each group.
+    scheduler_preview = Scheduler(owner)
+    pet_pairs = scheduler_preview.filter_by_pet(pet.name)
+    sorted_pairs = scheduler_preview._sort_tasks(pet_pairs)
+
+    if sorted_pairs:
+        st.write(f"**{pet.name}'s tasks** (sorted high → low priority):")
+        for i, (_, task) in enumerate(sorted_pairs):
             row = st.columns([3, 1, 1, 1, 1])
             status_icon = "✅" if task.completed else "⬜"
-            row[0].write(f"{status_icon} **{task.description}**  "
-                         f"({task.duration_minutes} min · {task.priority} · {task.frequency})")
+            time_tag = f" @{task.scheduled_time}" if task.scheduled_time else ""
+            priority_badge = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(task.priority, "")
+            row[0].write(
+                f"{status_icon} {priority_badge} **{task.description}**  "
+                f"({task.duration_minutes} min · {task.priority} · {task.frequency}{time_tag})"
+            )
 
             if row[1].button("Done", key=f"done_{i}"):
-                # ↓ Phase 2 method: Task.mark_complete()
                 task.mark_complete()
                 st.rerun()
 
             if row[2].button("Reset", key=f"reset_{i}"):
-                # ↓ Phase 2 method: Task.reset()
                 task.reset()
                 st.rerun()
 
             if row[3].button("Remove", key=f"remove_{i}"):
-                # ↓ Phase 2 method: Pet.remove_task()
                 pet.remove_task(task.description)
                 st.rerun()
     else:
@@ -152,15 +160,60 @@ st.divider()
 
 st.subheader("4. Today's Schedule")
 
+scheduler = Scheduler(owner)
+
+# --- Conflict warnings — shown always, not just after Generate is pressed ---
+conflicts = scheduler.conflict_warnings()
+if conflicts:
+    st.error(f"⚠️ {len(conflicts)} scheduling conflict(s) detected — fix before your day starts!")
+    for warning in conflicts:
+        # Parse the structured conflict data for a richer display
+        c = scheduler.detect_conflicts()[conflicts.index(warning)]
+        st.warning(
+            f"**{c['task_a']}** (@{c['time_a']}, {c['pet_a']})  ↔  "
+            f"**{c['task_b']}** (@{c['time_b']}, {c['pet_b']})  "
+            f"— overlap: **{c['overlap_minutes']} min**  \n"
+            f"*Tip: shift one task's start time by at least {c['overlap_minutes']} minute(s).*"
+        )
+
 if st.button("Generate schedule", type="primary"):
-    all_tasks = owner.get_all_tasks()       # ↑ Owner.get_all_tasks()
+    all_tasks = owner.get_all_tasks()
     if not all_tasks:
         st.warning("Add at least one task before generating a schedule.")
     else:
-        # ↓ Phase 2 method: Scheduler.generate_plan()
-        plan = Scheduler(owner).generate_plan()
-        st.markdown(plan.summary())
+        plan = scheduler.generate_plan()
 
+        # --- Time budget meter ---
+        pct = plan.total_minutes_used / plan.available_minutes if plan.available_minutes else 0
+        col_m1, col_m2 = st.columns([3, 1])
+        col_m1.progress(min(pct, 1.0))
+        col_m2.metric("Time used", f"{plan.total_minutes_used} / {plan.available_minutes} min")
+
+        # --- Scheduled tasks table ---
+        if plan.items:
+            st.success(f"{len(plan.items)} task(s) scheduled for {owner.name} today!")
+            df_scheduled = pd.DataFrame([
+                {
+                    "Pet":       item["pet"],
+                    "Task":      item["description"],
+                    "Time":      item.get("scheduled_time") or "—",
+                    "Duration":  f"{item['duration_minutes']} min",
+                    "Priority":  item["priority"].capitalize(),
+                    "Frequency": item["frequency"],
+                }
+                for item in plan.items
+            ])
+            st.table(df_scheduled)
+        else:
+            st.info("No tasks fit within your available time today.")
+
+        # --- Skipped tasks ---
         if plan.skipped:
-            st.info(f"{len(plan.skipped)} task(s) were skipped — "
-                    "increase your available minutes or remove lower-priority tasks to fit them in.")
+            with st.expander(f"⚠️ {len(plan.skipped)} task(s) couldn't fit — tap to see details"):
+                for item in plan.skipped:
+                    st.warning(
+                        f"**[{item['pet']}] {item['description']}** "
+                        f"({item['duration_minutes']} min, {item['priority']} priority)  \n"
+                        f"{item['reason']}  \n"
+                        "*Try increasing your available minutes or removing lower-priority tasks.*"
+                    )
