@@ -4,8 +4,27 @@
 
 **a. Initial design**
 
-- Briefly describe your initial UML design.
-- What classes did you include, and what responsibilities did you assign to each?
+**Three core user actions:**
+
+1. **Enter owner and pet information.** The user provides basic profile details — their name, the pet's name, and how much time they have available in a day. This sets the constraints that the scheduler will work within and personalizes the experience.
+
+2. **Add and edit care tasks.** The user can create tasks such as walks, feeding, medication, grooming, or enrichment activities. Each task has at minimum a duration (how long it takes) and a priority (how important it is). The user can also edit or remove existing tasks to keep the list current.
+
+3. **Generate and view a daily care schedule.** The user requests a daily plan, and the app produces an ordered schedule of tasks that fits within the available time. The plan is displayed clearly and includes an explanation of why tasks were chosen and ordered that way — helping the owner understand and trust the recommendations.
+
+The system uses five classes, all defined in `scheduler.py`:
+
+**`Task`** — holds one care activity. Attributes: `title` (str), `duration_minutes` (int), `priority` (str: low/medium/high). Methods: `priority_rank()` converts priority to a number for sorting; `is_valid()` validates inputs before scheduling; `__repr__()` for debugging.
+
+**`Pet`** — represents the animal. Attributes: `name`, `species`, `tasks` (list of Task). Methods: `add_task()` appends a validated task; `remove_task()` removes by title; `total_task_minutes()` sums all durations. Tasks belong to Pet, not Owner, so the design can support multiple pets in the future.
+
+**`Owner`** — represents the human user. Attributes: `name`, `available_minutes` (default 120). `available_minutes` lives here because it's the human's time budget, not a property of the animal.
+
+**`Scheduler`** — the core logic class. Attributes: `owner`, `pet`. Methods: `generate()` is the public entry point that runs a greedy scheduling algorithm; `_sort_tasks()` is a private helper that orders tasks high → medium → low priority, with alphabetical tiebreaking for determinism.
+
+**`Schedule`** — the output object. Attributes: `items` (included tasks as dicts), `skipped` (excluded tasks as dicts), `total_minutes_used`, `available_minutes`. Each dict includes a `"reason"` key with a natural-language explanation of why the task was included or skipped. Methods: `summary()` produces a markdown string for the UI; `has_items()` lets the UI decide whether to render results.
+
+Data flow: `Owner` + `Pet` (with `Task` list) → `Scheduler.generate()` → `Schedule` → displayed in `app.py`.
 
 **b. Design changes**
 
